@@ -1,4 +1,4 @@
-
+///
 module comet.attributes;
 
 import core.sys.windows.w32api,
@@ -6,6 +6,9 @@ import core.sys.windows.w32api,
 
 private immutable guidFormat_ = "Input string for GUID was not in a correct format";
 
+/**
+ * Initializes _a new GUID instance with the specified data.
+ */
 GUID guid(ubyte[16] b) {
   return GUID(b[3] << 24 | b[2] << 16 | b[1] << 8 | b[0],
               b[5] << 8 | b[4],
@@ -13,6 +16,7 @@ GUID guid(ubyte[16] b) {
               [b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]]);
 }
 
+/// ditto
 GUID guid(uint a, ushort b, ushort c, ubyte[8] d) { return GUID(a, b, c, d); }
 
 private ulong parse(string s) {
@@ -33,6 +37,7 @@ private ulong parse(string s) {
   return result;
 }
 
+/// ditto
 GUID guid(string s) {
   import std.string, std.exception;
 
@@ -85,6 +90,12 @@ private void hexToString(ref char[] s, ref size_t index, uint a, uint b) {
   s[index++] = hexToChar(b);
 }
 
+/**
+ Returns a string representation of the specified GUID value.
+ Params:
+   g = The GUID whose value is to be represented as a string.
+   fmt = The format specifier, which can be "D", "B" or "P". If null or empty, then "D" is used.
+ */
 string toString(GUID g, string fmt = "D") {
   import std.exception : assumeUnique;
 
@@ -121,6 +132,9 @@ string toString(GUID g, string fmt = "D") {
   return s.assumeUnique();
 }
 
+/**
+ Returns a 16-element array of bytes that contains the GUID value.
+ */
 ubyte[16] data(GUID g) @property {
   with (g) return [
     cast(ubyte)Data1, 
@@ -146,26 +160,40 @@ struct overload {
   string method;
 }
 
+/**
+ Specifies the dispatch identifier (DISPID) of a method.
+*/
 struct dispId {
   int value;
 }
 
 struct notMarshaled {}
 
+/**
+ Indicates that the HRESULT signature transformation that occurs during COM calls should be suppressed.
+*/
 struct keepReturn {}
 
+/**
+ Identifies how to marshal parameters to and from COM.
+ */
 enum MarshalingType {
-  bool_ = 1,
-  bstr,
-  lpstr,
-  lpwstr,
-  variantBool
+  bool_ = 1,  /// A 4-byte Win32 BOOL type.
+  bstr,       /// A Unicode string, the default COM string type.
+  lpstr,      /// A single-byte _null-terminated ANSI string.
+  lpwstr,     /// A 2-byte _null-terminated Unicode string.
+  variantBool /// A 2-byte VARIANT_BOOL type.
 }
 
+/**
+ Indicates how to marshal the data to and from COM.
+ */
 struct marshalAs {
+  /// Indicates the type the data is to be marshaled as.
   MarshalingType value;
 }
 
+/// ditto
 struct marshalReturnAs {
   MarshalingType value;
 }

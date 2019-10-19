@@ -12,43 +12,35 @@ template nameOf(alias T) {
 
 // static pattern matching
 auto match(alias T, cases...)() {
-  // __comet_match_result__ sentinel silences "unreachable statement" warnings
+  bool conditionToSuppressStatementNotReachableWarning = true;
 
   static foreach (i, _; cases) {
     static if (i % 2 == 1) {
       static if (is(typeof(cases[i - 1]) == bool)) {
         static if (cases[i - 1]) {
-          static if (!is(typeof(__comet_match_result__))) {
-            enum __comet_match_result__ = true;
+          if (conditionToSuppressStatementNotReachableWarning) 
             return cases[i]();
-          }
         }
       } else static if (is(Unqual!T == cases[i - 1])) {
-        static if (!is(typeof(__comet_match_result__))) {
-          enum __comet_match_result__ = true;
+        if (conditionToSuppressStatementNotReachableWarning) 
           return cases[i]();
-        }
       } else static if (is(typeof(T) == typeof(cases[i - 1]))) {
         static if (T == cases[i - 1]) {
-          static if (!is(typeof(__comet_match_result__))) {
-            enum __comet_match_result__ = true;
+          if (conditionToSuppressStatementNotReachableWarning) 
             return cases[i]();
-          }
         }
       }
     }
   }
 
-  static if (!is(typeof(__comet_match_result__))) {
-    static if (cases.length % 2 == 1) {
-      static if (isFunctionPointer!(typeof(cases[$ - 1]()))) {
-        return cases[$ - 1]()();
-      } else {
-        return cases[$ - 1]();
-      }
+  static if (cases.length % 2 == 1) {
+    static if (isFunctionPointer!(typeof(cases[$ - 1]()))) {
+      return cases[$ - 1]()();
     } else {
-      static assert(false, "no matches for `" ~ T.stringof ~ "`");
+      return cases[$ - 1]();
     }
+  } else {
+    static assert(false, "no matches for `" ~ T.stringof ~ "`");
   }
 }
 

@@ -1,3 +1,4 @@
+///
 module comet.core;
 
 import core.sys.windows.w32api,
@@ -64,6 +65,7 @@ class HResultException : Exception {
     super("%s (0x%08X)".format(getMessage(), cast(uint)(this.errorCode = errorCode)), file, line);
   }
 
+  /// ditto
   this(string message, HRESULT errorCode, string file = __FILE__, size_t line = __LINE__) {
     super("%s (0x%08X)".format(message, cast(uint)(this.errorCode = errorCode)), file, line);
   }
@@ -77,6 +79,13 @@ pragma(inline, true) bool isSuccessOK(HRESULT status) { return status == S_OK; }
 /// ditto
 pragma(inline, true) bool isFailure(HRESULT status) { return status < S_OK; }
 
+/**
+ Checks the result of a COM operation, throwing an HResultException if it fails.
+ Params:
+   status = The _status code.
+ Returns:
+   The _status code.
+ */
 HRESULT checkHR(HRESULT status, string file = __FILE__, size_t line = __LINE__) {
   enforce(status.isSuccess, new HResultException(status, file, line));
   return status;
@@ -84,6 +93,9 @@ HRESULT checkHR(HRESULT status, string file = __FILE__, size_t line = __LINE__) 
 
 enum HRESULT E_BOUNDS = 0x8000000B;
 
+/**
+ Catches exceptions and translates them into HRESULT values.
+ */
 HRESULT catchHR(T)(T delegate() block) {
   import core.exception : OutOfMemoryError, RangeError;
 
@@ -99,16 +111,25 @@ HRESULT catchHR(T)(T delegate() block) {
   catch (Exception)          { return E_FAIL; }
 }
 
+/**
+ The apartment model for the current thread.
+ Remarks:
+   Multithreaded apartments are intended for use by non-GUI threads.
+ */
 enum Apartment {
-  singleThreaded,
-  multiThreaded,
-  unknown,
+  singleThreaded, /// A single-threaded apartment.
+  multiThreaded,  /// A multithreaded apartment.
+  unknown,        /// The apartment model is not known.
 }
 
 /**
- Initializes COM and sets the apartment model for the current thread.
+ Initializes COM and sets the _apartment model for the current thread.
+ Params:
+   apartment = The _apartment model.
+ Remarks:
+   This is a helper function that calls [RoInitialize](https://docs.microsoft.com/en-us/windows/win32/api/roapi/nf-roapi-roinitialize) 
+   where Windows Runtime is available or [CoInitializeEx](https://docs.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-coinitializeex) otherwise.
  */
-// Desktop apps should specify Apartment.singleThreaded
 void initApartment(Apartment apartment = Apartment.singleThreaded) {
   static if (is(typeof(RoInitialize)))
     with (RO_INIT_TYPE) RoInitialize((apartment == Apartment.singleThreaded)
@@ -128,7 +149,18 @@ pragma(inline, true) void uninitApartment() {
     CoUninitialize();
 }
 
-// Desktop apps should specify Apartment.singleThreaded
+/**
+ Starts a scope wherein COM is initialized with the specified _apartment model.
+ At the end of the scope, COM is closed on the current thread.
+ Examples:
+ ---
+ new Thread({
+   with (apartmentScope(Apartment.multiThreaded)) {
+     // Perform tasks
+   }
+ }).start();
+ ---
+ */
 auto apartmentScope(Apartment apartment = Apartment.multiThreaded) {
 
   static struct ApartmentScope {
@@ -139,6 +171,9 @@ auto apartmentScope(Apartment apartment = Apartment.multiThreaded) {
   return ApartmentScope(apartment);
 }
 
+/**
+ Returns a value indicating the current apartment model.
+ */
 Apartment apartmentState() @property {
   APTTYPE type;
   APTTYPEQUALIFIER qualifier;
@@ -166,9 +201,16 @@ Apartment apartmentState() @property {
 }
 
 /**
- Retrieves the GUID associated with the specified type.
+ Retrieves the GUID associated with the specified type or reference.
+ Remarks:
+   If null is supplied as the type, guidOf will return a GUID whose value is all zeros.
+ Examples:
+ ---
+ immutable iid = guidOf!IXMLDOMDocument;
+ ---
  */
-template guidOf(alias T) {
+template guidOf(alias T) 
+  if (is(T : IUnknown) || is(typeof(T) == typeof(null))) {
   import core.sys.windows.uuid;
 
   enum typeName = __traits(identifier, T);
@@ -177,16 +219,20 @@ template guidOf(alias T) {
     enum moduleName = .moduleName!T;
     enum code = mixin(q{
       static import $moduleName;
-      static if (is(typeof($moduleName.IID_$typeName))) enum guidOf = $moduleName.IID_$typeName;
+           static if (is(typeof($moduleName.IID_$typeName)))   enum guidOf = $moduleName.IID_$typeName;
+      else static if (is(typeof($moduleName.CLSID_$typeName))) enum guidOf = $moduleName.CLSID_$typeName;
+      else static if (is(typeof($moduleName.DIID_$typeName)))  enum guidOf = $moduleName.DIID_$typeName;
       else static assert(false);
     }.inject);
   }
 
-       static if (is(typeof(T == null)))                enum guidOf = GUID.init;
-  else static if (hasUDA!(T, GUID))                     enum guidOf = getUDAs!(T, GUID)[0];
-  else static if (is(typeof(mixin("IID_" ~ typeName)))) mixin("enum guidOf = IID_" ~ typeName ~ ";");
-  else static if (__traits(compiles, { mixin(code); })) mixin(code);
-  else static                                           assert(false, "no GUID has been associated with `" ~ typeName ~ "`");
+       static if (is(typeof(T == null)))                  enum guidOf = GUID.init;
+  else static if (hasUDA!(T, GUID))                       enum guidOf = getUDAs!(T, GUID)[0];
+  else static if (is(typeof(mixin("IID_" ~ typeName))))   mixin("enum guidOf = IID_" ~ typeName ~ ";");
+  else static if (is(typeof(mixin("CLSID_" ~ typeName)))) mixin("enum guidOf = CLSID_" ~ typeName ~ ";");
+  else static if (is(typeof(mixin("DIID_" ~ typeName))))  mixin("enum guidOf = DIID_" ~ typeName ~ ";");
+  else static if (__traits(compiles, { mixin(code); }))   mixin(code);
+  else static                                             assert(false, "no GUID has been associated with `" ~ typeName ~ "`");
 }
 
 /**
@@ -200,6 +246,13 @@ GUID makeGUID() {
   return g;
 }
 
+/**
+ Returns the requested interface if it is supported.
+ Returns:
+   A reference to the requested interface if supported. Otherwise, null.
+ Remarks:
+   This is a helper function that calls [QueryInterface](https://docs.microsoft.com/en-us/windows/desktop/api/unknwn/nf-unknwn-iunknown-queryinterface(refiid_void)).
+ */
 T tryAs(T)(IUnknown source, IID targetId)
   if (is(T : IUnknown)) {
   T target;
@@ -207,6 +260,7 @@ T tryAs(T)(IUnknown source, IID targetId)
   return target;
 }
 
+/// ditto
 T tryAs(T)(IUnknown source)
   if (is(T : IUnknown)) {
   return tryAs!T(source, guidOf!T);
@@ -228,6 +282,15 @@ pragma(inline, true) private bool tryMake(T)(CLSID classId, IID interfaceId, Exe
   return CoCreateInstance(&classId, null, context, &interfaceId, cast(void**)&result).isSuccessOK;
 }
 
+/**
+ Creates an instance of the COM class associated with the specified identifier.
+ Params:
+   classId     = The identifier of the class.
+   interfaceId = The identifier of the interface.
+   context     = The _context in which the instance will run.
+ Remarks:
+   This is a helper function that calls [CoCreateInstance](https://docs.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-cocreateinstance).
+ */
 auto make(T)(CLSID classId, IID interfaceId, ExecutionContext context = defaultExecutionContext)
 if (is(T : IUnknown)) {
   T result;
@@ -248,10 +311,12 @@ if (is(T : IUnknown)) {
   return null;
 }
 
+/// ditto
 auto make(T = IUnknown)(CLSID classId, ExecutionContext context = defaultExecutionContext) {
   return make!T(classId, guidOf!T, context);
 }
 
+/// ditto
 auto make(T = IUnknown)(string classId, ExecutionContext context = defaultExecutionContext) {
   GUID clsid;
   if (!CLSIDFromProgID(classId.toUTFz!(wchar*), &clsid).isSuccessOK) {
@@ -263,25 +328,27 @@ auto make(T = IUnknown)(string classId, ExecutionContext context = defaultExecut
 
 private template hasMember(T, string name) {
   static if (__traits(hasMember, T, name)) {
-    enum hasMember_ = true;
+    enum comet_core_hasMember_result = true;
   } else static foreach (m; __traits(allMembers, T)) {
-    static if (!is(typeof(hasMember_))) {
+    static if (!is(typeof(comet_core_hasMember_result))) {
       static if (hasUDA!(__traits(getMember, T, m), overload) &&
                  getUDAs!(__traits(getMember, T, m), overload)[0].method == name) {
-        enum hasMember_ = true;
+        enum comet_core_hasMember_result = true;
       }
     }
   }
 
-  static if (!is(typeof(hasMember_))) enum hasMember = false;
-  else                                enum hasMember = true;
+  static if (!is(typeof(comet_core_hasMember_result))) enum hasMember = false;
+  else                                                 enum hasMember = true;
 }
 
 pragma(inline) private void checkNotNull(T)(T ptr, string argument) {
   enforce(ptr !is null, "`" ~ argument ~ "` was null");
 }
 
-// Super-smart pointer
+/**
+ Represents a pointer to the interface specified by the template parameter.
+ */
 struct UnknownPtr(T)
   if (is(T : IUnknown)) {
 
@@ -301,8 +368,12 @@ struct UnknownPtr(T)
     return 0;
   }
 
+  /**
+   Initializes a new instance with the specified data.
+   */
   this(U)(U other) if (is(U : T)) { ptr_ = other; }
 
+  /// ditto
   this(U)(auto ref U other)
     if (!is(U : T) &&
         !is(U == typeof(this)) &&
@@ -311,15 +382,18 @@ struct UnknownPtr(T)
     ptr_ = tryAs!T(other);
   }
 
+  /// ditto
   this(U)(auto ref U other)
     if (is(U : VARIANT)) {
     with (VARENUM) if (other.vt == VT_DISPATCH) ptr_ = tryAs!T(other.pdispVal);
     else           if (other.vt == VT_UNKNOWN)  ptr_ = tryAs!T(other.punkVal);
   }
 
+  /// ditto
   this(U)(U)
     if (is(U == typeof(null))) {}
 
+  /// ditto
   this(ref typeof(this) other) {
     ptr_ = other.ptr_;
     internalAddRef();
@@ -329,6 +403,9 @@ struct UnknownPtr(T)
     internalRelease();
   }
 
+  /**
+   Returns the underlying raw pointer.
+   */
   ref T ptr() @property { return ptr_; }
   alias ptr this;
 
@@ -380,6 +457,9 @@ struct UnknownPtr(T)
   bool opEquals(U)(U)
     if (is(U == typeof(null))) { return !ptr_; }
 
+  /**
+   Forwards calls to the underlying pointer.
+   */
   template opDispatch(string name) {
     enum isCamelCase = name.isCamelCase;
     enum realName = name.toPascalCase();
@@ -530,7 +610,7 @@ pragma(inline, true) bool validateBSTR(wchar* s, out size_t length) {
   return (length = (s != null) ? wcslen(s) : 0) == SysStringLen(s);
 }
 
-private auto generateOpDispatchTransform(alias member, T, Args...)(T ptr, ref Args args) {
+private void generateOpDispatchTransform(alias member, T, Args...)(T ptr, ref Args args) {
   checkNotNull(ptr, nameOf!ptr);
 
   alias Return = ReturnType!member,
@@ -622,7 +702,7 @@ private auto generateOpDispatchTransform(alias member, T, Args...)(T ptr, ref Ar
   mixin(code);
 }
 
-private auto opDispatchTransformImpl(string name, T, Args...)(T ptr, ref Args args)
+private void opDispatchTransformImpl(string name, T, Args...)(T ptr, ref Args args)
   if (is(T : IUnknown)) {
   static if (__traits(hasMember, ptr, name)) {
     alias overloads = __traits(getOverloads, T, name);
@@ -632,7 +712,7 @@ private auto opDispatchTransformImpl(string name, T, Args...)(T ptr, ref Args ar
         static if (!is(typeof(opDispatchTransformImplOverloadFound))) {
           enum opDispatchTransformImplOverloadFound = true;
 
-          return generateOpDispatchTransform!member(ptr, args);
+          generateOpDispatchTransform!member(ptr, args);
         }
       }
     }
@@ -1553,6 +1633,7 @@ struct _Variant {
 
 }
 
+// Enables COM objects to be managed by the GC
 extern(C) Object _d_newclass(const(ClassInfo) typeInfo) {
   import core.memory : GC;
 
@@ -1570,6 +1651,15 @@ extern(C) Object _d_newclass(const(ClassInfo) typeInfo) {
 
 extern (C) void rt_finalize(void* p, bool det = true);
 
+/**
+ A template that provides overrides for methods required by the IUnknown interface.
+ Examples:
+ ---
+ class MyUnknown : IUnknown {
+   mixin Unknown;
+ }
+ ---
+ */
 mixin template Unknown() {
 
   import core.sys.windows.windef,
@@ -1702,6 +1792,9 @@ auto invokeHandler(T)(int dispIdMember, DISPPARAMS* pDispParams, VARIANT* pVarRe
   }
 }
 
+/**
+ A template that provides overrides of methods required by the IDispatch interface.
+ */
 mixin template Dispatch() {
 
   import core.sys.windows.windef,
@@ -2039,6 +2132,9 @@ enum marshalReturn(T : SAFEARRAY*, MarshalingType _) = q{
   *$(paramNames[$ - 1]) = _$memberName_result.safeArray;
 };
 
+/**
+ A template that generates overrides for any interface in the type's base interface list.
+ */
 mixin template Marshaling() {
 
   import core.sys.windows.w32api,
@@ -2284,6 +2380,9 @@ import core.sys.windows.winrt.inspectable,
   core.sys.windows.winrt.activation,
   core.sys.windows.winrt.eventtoken;
 
+/**
+ A template that provides overrides for methods required by the IInspectable interface.
+ */
 mixin template Inspectable() {
 
   mixin Unknown;
