@@ -161,6 +161,64 @@ class XMLHTTPRequestCallback : IXMLHTTPRequest2Callback {
 }
 ```
 
-To round off this introduction, here's a few code samples.
+To round off this introduction, here's a few code examples.
 
 ## Code examples
+
+This example, which sends an email using CDOSys, demonstrates creating objects, calling methods and using indexers.
+
+```d
+import comet.core;
+
+void main() {
+  UnknownPtr!IDispatch message = make("CDO.Message");
+
+  auto fields = message.fields;
+  fields["http://schemas.microsoft.com/cdo/configuration/sendusing"] = /*cdoSendUsingPort*/ 2;
+  fields["http://schemas.microsoft.com/cdo/configuration/smtpserverport"] = 25;
+  fields["http://schemas.microsoft.com/cdo/configuration/smtpserver"] = "mail.example.com";
+  fields.update();
+
+  message.from = "sender@example.com";
+  message.to = "recipient@example.com";
+
+  message.subject = "Book club choice";
+  message.textBody = "Anyone have any suggestions for what to read for next month's book club? 
+    I've attached a list of some recent novels we might consider.";
+  message.addAttachment(r"c:\users\user\booklist.docx");
+
+  message.send();
+}
+```
+
+Another example, which queries a database using ADODB.
+
+```d
+import comet.core;
+
+void main() {
+  UnknownPtr!IDispatch db = make("ADODB.Connection");
+  db.connectionString = r"Provider=msoledbsql; 
+    Server=(localdb)\mssqllocaldb; 
+    AttachDbFilename=|datadirectory|company.mdf; 
+    Trusted_Connection=yes";
+  db.open();
+
+  UnknownPtr!IDispatch command = make("ADODB.Command");
+  command.activeConnection = db;
+  command.commandText = "select * from Employees where FirstName = ?";
+
+  UnknownPtr!IDispatch parameter = make("ADODB.Parameter");
+  parameter.name = "firstName";
+  parameter.value = "Ian";
+
+  command.parameters.append(parameter);
+  auto rs = command.execute();
+
+  writeln("Employees named 'Ian':");
+  while (!rs.eof) {
+    writeln(cast(string)rs["LastName"]);
+    rs.moveNext();
+  }
+}
+```

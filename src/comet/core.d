@@ -83,6 +83,8 @@ pragma(inline, true) bool isFailure(HRESULT status) { return status < S_OK; }
  Checks the result of a COM operation, throwing an HResultException if it fails.
  Params:
    status = The _status code.
+   file   = The source file of the caller.
+   line   = The line number in the source file of the caller.
  Returns:
    The _status code.
  */
@@ -1134,7 +1136,7 @@ T variantGet(T)(auto ref VARIANT source, lazy T defaultValue = T.init)
     else static if (is(T == short))      return (vt == VT_I2) ? iVal : defaultValue;
     else static if (is(T == float))      return (vt == VT_R4) ? fltVal : defaultValue;
     else static if (is(T == double))     return (vt == VT_R8) ? dblVal : defaultValue;
-    else static if (is(T == bool))       return (vt == VT_R8) ? (boolVal != VARIANT_FALSE) : defaultValue;
+    else static if (is(T == bool))       return (vt == VT_BOOL) ? (boolVal != VARIANT_FALSE) : defaultValue;
     else static if (is(T == DateTime)) { if (vt != VT_DATE) return defaultValue;
                                          SYSTEMTIME temp;
                                          VariantTimeToSystemTime(date, &temp);
