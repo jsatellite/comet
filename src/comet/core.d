@@ -466,12 +466,12 @@ struct UnknownPtr(T)
     enum isCamelCase = name.isCamelCase;
     enum realName = name.toPascalCase();
 
-    enum getPrefix = "get_", setPrefix = "put_";
+    enum getPrefix = "get_", setPrefix = "put_", setRefPrefix = "putref_";
     enum addPrefix = "add_", removePrefix = "remove_";
 
     // For property accessors
-    enum getName = getPrefix ~ name, setName = setPrefix ~ name;
-    enum realGetName = getPrefix ~ realName, realSetName = setPrefix ~ realName;
+    enum getName = getPrefix ~ name, setName = setPrefix ~ name, setRefName = setRefPrefix ~ name;
+    enum realGetName = getPrefix ~ realName, realSetName = setPrefix ~ realName, realSetRefName = setRefPrefix ~ realName;
 
     // For event operations
     enum addName = addPrefix ~ name, removeName = removePrefix ~ name;
@@ -484,6 +484,8 @@ struct UnknownPtr(T)
         return opDispatch!realGetName();
       } else static if (!__traits(hasMember, ptr_, name) && isCamelCase && hasMember!(T, realSetName) && args.length == 1) {
         return opDispatch!realSetName(args);
+      } else static if (!__traits(hasMember, ptr_, name) && isCamelCase && hasMember!(T, realSetRefName) && args.length == 1) {
+        return opDispatch!realSetRefName(args);
       } else static if (!__traits(hasMember, ptr_, name) && isCamelCase &&
                         (__traits(hasMember, ptr_, realAddName) || __traits(hasMember, ptr_, realRemoveName)) && args.length == 0) {
         return opDispatchEventImpl!realName(ptr_);
@@ -491,6 +493,8 @@ struct UnknownPtr(T)
         return opDispatch!getName();
       } else static if (__traits(hasMember, ptr_, setName) && args.length == 1) {
         return opDispatch!setName(args);
+      } else static if (__traits(hasMember, ptr_, setRefName) && args.length == 1) {
+        return opDispatch!setRefName(args);
       } else static if ((__traits(hasMember, ptr_, addName) || __traits(hasMember, ptr_, removeName)) && args.length == 0) {
         return opDispatchEventImpl!name(ptr_);
       } else static if (__traits(compiles, opDispatchImpl!name(ptr_, args))) {
@@ -1667,7 +1671,8 @@ mixin template Unknown() {
   import core.sys.windows.windef,
     core.sys.windows.basetyps;
 
-  private shared int references_ = 1;
+  private enum referencesInit_ = 1;
+  private shared int references_ = referencesInit_;
 
   override extern(Windows) HRESULT QueryInterface(REFIID riid, void** ppv) {
     import core.sys.windows.unknwn, std.traits : InterfacesTuple;
@@ -1691,7 +1696,7 @@ mixin template Unknown() {
     import core.atomic : atomicOp;
     import core.memory : GC;
     
-    if (references_.atomicOp!"+="(1) == 2)
+    if (references_.atomicOp!"+="(1) == referencesInit_ + 1)
       GC.addRoot(cast(void*)this);
     return references_;
   }
@@ -2400,7 +2405,7 @@ mixin template Inspectable() {
     import std.meta : Filter, templateAnd, templateNot, ApplyRight;
     import std.traits : InterfacesTuple;
 
-    enum hasGUID(T)        = is(typeof(guidOf!T));
+    enum hasGUID(T) = is(typeof(guidOf!T));
 
     alias interfaces = Filter!(templateAnd!(hasGUID, 
                                             ApplyRight!(templateNot!Contains, IUnknown, IInspectable)),
