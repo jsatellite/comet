@@ -373,7 +373,10 @@ struct UnknownPtr(T)
   /**
    Initializes a new instance with the specified data.
    */
-  this(U)(U other) if (is(U : T)) { ptr_ = other; }
+  this(U)(U other)
+    if (is(U : T)) {
+    ptr_ = other;
+  }
 
   /// ditto
   this(U)(auto ref U other)
@@ -417,8 +420,15 @@ struct UnknownPtr(T)
     return &ptr_;
   }
 
+  ref opAssign(U)(U other)
+    if (is(U : T) && !is(U == typeof(null))) {
+    internalRelease();
+    ptr_ = other;
+    return this;
+  }
+
   ref opAssign(U)(auto ref U other)
-    if (!is(U == T) &&
+    if (!is(U : T) &&
         !is(U == typeof(this)) &&
         !is(U : VARIANT) &&
         !is(U == typeof(null))) {
@@ -438,6 +448,14 @@ struct UnknownPtr(T)
   ref opAssign(U)(U)
     if (is(U == typeof(null))) {
     internalRelease();
+    return this;
+  }
+
+  ref opOpAssign(string op, U)(U other)
+    if (op == "+" && is(U : T) && !is(U == typeof(null))) {
+    internalRelease();
+    ptr_ = other;
+    internalAddRef();
     return this;
   }
 
@@ -463,6 +481,8 @@ struct UnknownPtr(T)
    Forwards calls to the underlying pointer.
    */
   template opDispatch(string name) {
+    static assert(name != "asUnknownPtr");
+
     enum isCamelCase = name.isCamelCase;
     enum realName = name.toPascalCase();
 
@@ -586,6 +606,13 @@ struct UnknownPtr(T)
 auto asUnknownPtr(T)(T source)
   if (is(T : IUnknown)) { return UnknownPtr!T(source); }
 
+auto asUnknownPtrInc(T)(T source)
+  if (is(T : IUnknown)) {
+  auto u = UnknownPtr!T(source);
+  u.internalAddRef();
+  return u;
+}
+
 auto asUnknownPtr(T, U)(auto ref U source)
   if (is(T : IUnknown)) { return UnknownPtr!T(source); }
 
@@ -616,7 +643,7 @@ pragma(inline, true) bool validateBSTR(wchar* s, out size_t length) {
   return (length = (s != null) ? wcslen(s) : 0) == SysStringLen(s);
 }
 
-private void generateOpDispatchTransform(alias member, T, Args...)(T ptr, ref Args args) {
+private auto generateOpDispatchTransform(alias member, T, Args...)(T ptr, ref Args args) {
   checkNotNull(ptr, nameOf!ptr);
 
   alias Return = ReturnType!member,
@@ -708,7 +735,7 @@ private void generateOpDispatchTransform(alias member, T, Args...)(T ptr, ref Ar
   mixin(code);
 }
 
-private void opDispatchTransformImpl(string name, T, Args...)(T ptr, ref Args args)
+private auto opDispatchTransformImpl(string name, T, Args...)(T ptr, ref Args args)
   if (is(T : IUnknown)) {
   static if (__traits(hasMember, ptr, name)) {
     alias overloads = __traits(getOverloads, T, name);
@@ -718,7 +745,7 @@ private void opDispatchTransformImpl(string name, T, Args...)(T ptr, ref Args ar
         static if (!is(typeof(opDispatchTransformImplOverloadFound))) {
           enum opDispatchTransformImplOverloadFound = true;
 
-          generateOpDispatchTransform!member(ptr, args);
+          return generateOpDispatchTransform!member(ptr, args);
         }
       }
     }
@@ -917,8 +944,8 @@ private auto opDispatchEventImpl(string name, T)(T ptr) {
   checkNotNull(ptr, nameOf!ptr);
   static if (__traits(hasMember, ptr, "add_" ~ name) && 
              __traits(hasMember, ptr, "remove_" ~ name)) {
-    alias TEventHandler = Parameters!(__traits(getMember, ptr, "add_" ~ name))[0];
-    alias TToken = PointerTarget!(Parameters!(__traits(getMember, ptr, "add_" ~ name))[1]);
+    alias TEventHandler = Parameters!(__traits(getMember, ptr, "add_" ~ name))[$ - 2];
+    alias TToken = PointerTarget!(Parameters!(__traits(getMember, ptr, "add_" ~ name))[$ - 1]);
     return EventOpHelper!(TEventHandler, TToken)(&__traits(getMember, ptr, "add_" ~ name),
                                                  &__traits(getMember, ptr, "remove_" ~ name));
   } else {
@@ -2324,7 +2351,9 @@ mixin template Marshaling() {
   mixin(code);
 }
 
-struct EventOpHelper(TEventHandler, TToken) {
+template callback(TEventHandler) {
+
+  static assert(is(TEventHandler : IUnknown));
 
   alias TArgs = Parameters!(TEventHandler.Invoke);
   alias THandler = void delegate(TArgs);
@@ -2335,8 +2364,17 @@ struct EventOpHelper(TEventHandler, TToken) {
     THandler handler_;
     this(THandler handler) { handler_ = handler; }
     HRESULT Invoke(TArgs args) { return catchHR(() => handler_(args)); }
-
   }
+
+  auto ref callback(THandler handler) {
+    return (cast(TEventHandler)new Callback(handler)).asUnknownPtr();
+  }
+}
+
+struct EventOpHelper(TEventHandler, TToken) {
+
+  alias TArgs = Parameters!(TEventHandler.Invoke);
+  alias THandler = void delegate(TArgs);
 
   import std.functional : toDelegate;
 
@@ -2367,12 +2405,12 @@ struct EventOpHelper(TEventHandler, TToken) {
 
     static if (op == "+" || op == "~") {
       TToken token;
-      checkHR(addMethod_((cast(TEventHandler)new Callback(handler)).asUnknownPtr(), &token));
+      checkHR(addMethod_(callback!TEventHandler(handler), &token));
       synchronized eventRegistrationTokens_[cast(size_t)target][key] = token;
     } else static if (op == "-") {
       synchronized if (auto tokens = cast(size_t)target in eventRegistrationTokens_) {
         if (auto token = key in *tokens) {
-          (*token).remove(key);
+          (*tokens).remove(key);
           checkHR(removeMethod_(*token));
         }
       }

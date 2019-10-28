@@ -95,7 +95,7 @@ Various event-handling mechanisms are supported: simple `IDispatch`-based handle
 import msxml6.d;
 
 UnknownPtr!IXMLDOMDocument doc = ...;
-doc.onReadyStateChange = () => writeln("readyState: " cast(int)doc.readyState);
+doc.onReadyStateChange = () => writeln("readyState: ", doc.readyState);
 ```
 
 But most of the time you'll be hooking up to event sources with the `+=` operator (or `~=` if you prefer):
