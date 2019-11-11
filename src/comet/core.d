@@ -464,12 +464,12 @@ struct UnknownPtr(T)
 
   U opCast(U)()
     if (!is(U == T) &&
-        !is(U == Pointer!A, A) &&
+        !is(U == UnknownPtr!A, A) &&
         !is(U : VARIANT) &&
         !is(U == bool)) { return tryAs!U(ptr_); }
 
   U opCast(U)()
-    if (is(U == Pointer!A, A)) { return Pointer!(TemplateArgsOf!U)(ptr_); }
+    if (is(U == UnknownPtr!A, A)) { return UnknownPtr!(TemplateArgsOf!U)(ptr_); }
 
   bool opCast(U)()
     if (is(U == bool)) { return !!ptr_; }
@@ -944,9 +944,14 @@ private auto opDispatchEventImpl(string name, T)(T ptr) {
   checkNotNull(ptr, nameOf!ptr);
   static if (__traits(hasMember, ptr, "add_" ~ name) && 
              __traits(hasMember, ptr, "remove_" ~ name)) {
-    alias TEventHandler = Parameters!(__traits(getMember, ptr, "add_" ~ name))[$ - 2];
-    alias TToken = PointerTarget!(Parameters!(__traits(getMember, ptr, "add_" ~ name))[$ - 1]);
-    return EventOpHelper!(TEventHandler, TToken)(&__traits(getMember, ptr, "add_" ~ name),
+    alias addMethod = __traits(getMember, ptr, "add_" ~ name);
+    alias removeMethod = __traits(getMember, ptr, "remove_" ~ name);
+
+    alias TEventHandler = Parameters!addMethod[$ - 2];
+    alias TToken = PointerTarget!(Parameters!addMethod[$ - 1]);
+    static assert(is(Parameters!removeMethod[$ - 1] == TToken));
+
+    return EventOpHelper!(TEventHandler, TToken)(&__traits(getMember, ptr, "add_" ~ name), 
                                                  &__traits(getMember, ptr, "remove_" ~ name));
   } else {
     return opDispatchImpl!name(ptr);
@@ -1735,9 +1740,9 @@ mixin template Unknown() {
 
     immutable remaining = references_.atomicOp!"-="(1);
     if (remaining == 0) {
-      //static if (is(typeof(this.__dtor))) this.__dtor();
+      /+static if (is(typeof(this.__dtor))) this.__dtor();+/
       // lifetime.d's _d_newclass uses `malloc` for COM classes so `free` here
-      //free(cast(void*)this);
+      /+free(cast(void*)this);+/
       GC.removeRoot(cast(void*)this);
       rt_finalize(cast(void*)this);
     }

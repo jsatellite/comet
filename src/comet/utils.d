@@ -137,8 +137,26 @@ struct TaskBuffer(T) {
   size_t size() @property { return size_; }
   alias opDollar = size;
 
+  T** opUnary(string op)() if (op == "*") { return &ptr_; }
+
+  void opAssign(typeof(null)) { __dtor(); }
+
   auto opIndex(size_t index) { return ptr_[index]; }
   auto opIndex() { return ptr_[0 .. size_]; }
   auto opSlice(size_t x, size_t y) { return ptr_[x .. y]; }
+
+  string toString() {
+    import std.algorithm : max;
+    import std.conv : to;
+    import core.stdc.wchar_ : wcslen;
+    import core.stdc.string : strlen;
+
+    static if (is(T == wchar))
+      return ptr_[0 .. max(wcslen(ptr_), size_)].to!string();
+    else static if (is(T == char))
+      return ptr_[0 .. max(strlen(ptr_), size_)].to!string();
+    else
+      return ptr_[0 .. size_].to!string();
+  }
 
 }
